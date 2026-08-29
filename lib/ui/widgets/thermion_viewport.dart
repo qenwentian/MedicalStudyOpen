@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:thermion_flutter/thermion_flutter.dart';
+import 'package:vector_math/vector_math_64.dart';
+import '../../services/database_service.dart';
 
 /// A high-performance 3D viewport wrapping Google Filament via Thermion.
 ///
@@ -9,24 +11,28 @@ import 'package:thermion_flutter/thermion_flutter.dart';
 /// 2. **Global System UBO Bridge:** Exposes a single O(1) FFI call to mutate system-level
 ///    opacities on the GPU (`setSystemAlpha(uboIndex, alpha)`).
 class ThermionViewport extends StatefulWidget {
-  final String assetPath;
+  final List<String> assetPaths;
   final void Function(ThermionViewer viewer)? onViewerReady;
 
   /// Emits the resolved integer mesh key from the native spatial BVH hit.
   final void Function(int meshKey)? onMeshKeyPicked;
+  
+  /// Emits when the user taps the background.
+  final VoidCallback? onBackgroundTapped;
 
   const ThermionViewport({
     super.key,
-    required this.assetPath,
+    required this.assetPaths,
     this.onViewerReady,
     this.onMeshKeyPicked,
+    this.onBackgroundTapped,
   });
 
   @override
-  State<ThermionViewport> createState() => _ThermionViewportState();
+  State<ThermionViewport> createState() => ThermionViewportState();
 }
 
-class _ThermionViewportState extends State<ThermionViewport> {
+class ThermionViewportState extends State<ThermionViewport> {
   // ignore: unused_field
   ThermionViewer? _viewer;
 
@@ -51,10 +57,21 @@ class _ThermionViewportState extends State<ThermionViewport> {
       final pickResult = await _viewer!.pick(physicalX, physicalY);
       
       if (pickResult != null && mounted) {
-         // TODO: Resolve pickResult against manifest.
-         // Simulating resolution for now:
-         debugPrint('Picked entity: $pickResult');
-         widget.onMeshKeyPicked?.call(1002);
+        final entityId = pickResult.toString();
+        // The ID points to something! Let's resolve it.
+        // Guarantee database is warmed up before searching (prevents race condition)
+        await DatabaseService().database;
+        if (!mounted) return;
+        final entity = DatabaseService().getEntityById(entityId);
+        
+        if (entity != null) {
+          debugPrint('Picked entity: ${entity.latinName} (Key: ${entity.meshKey})');
+          widget.onMeshKeyPicked?.call(entity.meshKey);
+        } else {
+          debugPrint('Picked unknown entity ID: $entityId');
+        }
+      } else if (mounted) {
+        widget.onBackgroundTapped?.call();
       }
 
     } catch (e) {
@@ -62,12 +79,11 @@ class _ThermionViewportState extends State<ThermionViewport> {
     }
   }
 
-  /// Sets the opacity of an entire anatomical system on the GPU in a single FFI call.
-  /// Mutates the global GPU UBO buffer `u_SystemAlpha[uboIndex]`.
-  void setSystemAlpha(int uboIndex, double alpha) {
+  void setSystemAlpha(String systemId, double alpha) {
     if (_viewer == null) return;
-    // Single FFI crossing to native UBO buffer
-    debugPrint('GPU UBO Set: u_SystemAlpha[$uboIndex] = $alpha');
+    
+    debugPrint('GPU Material Set: MAT_$systemId alpha = $alpha');
+    _viewer!.setMaterialProperty('MAT_$systemId', 'baseColorFactor', [1.0, 1.0, 1.0, alpha]);
   }
 
   @override
@@ -90,10 +106,12 @@ class _ThermionViewportState extends State<ThermionViewport> {
           // Prevents the "Draco Main-Thread Trap". Thermion handles 
           // gltfio initialization in a C++ worker thread pool.
           try {
-            debugPrint('Async loading asset: ${widget.assetPath}');
-            // Depending on the thermion version, the exact API might be loadAsset, 
-            // loadGlb, or similar, but we assume an async Future is returned.
-            await viewer.loadGltf(widget.assetPath);
+            for (final path in widget.assetPaths) {
+              debugPrint('Async loading asset: $path');
+              // Depending on the thermion version, the exact API might be loadAsset, 
+              // loadGlb, or similar, but we assume an async Future is returned.
+              await viewer.loadGltf(path);
+            }
           } catch (e) {
             debugPrint('Error loading asset asynchronously: $e');
           }

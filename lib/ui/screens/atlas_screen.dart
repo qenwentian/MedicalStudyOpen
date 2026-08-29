@@ -21,6 +21,7 @@ class AtlasScreen extends StatefulWidget {
 
 class _AtlasScreenState extends State<AtlasScreen> {
   final DatabaseService _db = DatabaseService();
+  final GlobalKey<ThermionViewportState> _viewportKey = GlobalKey<ThermionViewportState>();
 
   // ignore: unused_field
   ThermionViewer? _viewer;
@@ -37,18 +38,26 @@ class _AtlasScreenState extends State<AtlasScreen> {
   }
 
   Future<void> _loadSystems() async {
-    final systems = await _db.getAllSystems();
-    if (mounted) {
-      setState(() {
-        _systems = systems;
-        for (final s in systems) {
-          _systemAlphas[s.systemId] = 1.0;
-        }
-      });
+    try {
+      final systems = await _db.getAllSystems();
+      if (mounted) {
+        setState(() {
+          _systems = systems;
+          for (final s in systems) {
+            _systemAlphas[s.systemId] = 1.0;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load systems: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 
   void _onViewerReady(ThermionViewer viewer) {
+    if (!mounted) return;
     setState(() {
       _viewer = viewer;
       _isLoading = false;
@@ -69,7 +78,7 @@ class _AtlasScreenState extends State<AtlasScreen> {
     final uboIndex = _db.getUboIndexForSystem(systemId);
     if (uboIndex == null || _viewer == null) return;
 
-    // Single FFI call per slider frame -> mutates u_SystemAlpha[uboIndex] on GPU
+    _viewportKey.currentState?.setSystemAlpha(systemId, alpha);
     debugPrint('GPU UBO Call: SetSystemAlpha(uboIndex: $uboIndex, alpha: $alpha)');
   }
 
@@ -82,9 +91,20 @@ class _AtlasScreenState extends State<AtlasScreen> {
           // ── 1. 3D Viewport (Full Screen) ──────────────────────
           Positioned.fill(
             child: ThermionViewport(
-              assetPath: 'assets/3d/skeleton_lod0.glb',
+              key: _viewportKey,
+              assetPaths: const [
+                'assets/3d/sys_skeletal_lod0.glb',
+                'assets/3d/sys_nervous_lod0.glb',
+                'assets/3d/sys_visceral_lod0.glb',
+                'assets/3d/sys_vascular_lod0.glb',
+                'assets/3d/sys_muscular_lod0.glb',
+                'assets/3d/sys_integumentary_lod0.glb',
+              ],
               onViewerReady: _onViewerReady,
               onMeshKeyPicked: _onMeshKeyPicked,
+              onBackgroundTapped: () {
+                if (mounted) setState(() => _selectedEntity = null);
+              },
             ),
           ),
 
