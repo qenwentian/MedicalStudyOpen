@@ -16,6 +16,7 @@ import sys
 import os
 import json
 import argparse
+import struct
 
 try:
     import bpy
@@ -164,6 +165,67 @@ def process_collection(collection, system_info, output_dir, manifest_entries, bv
 
     return key_counter
 
+class BvhNode:
+    def __init__(self):
+        self.min = [0.0, 0.0, 0.0]
+        self.max = [0.0, 0.0, 0.0]
+        self.left_child = -1
+        self.payload = -1
+
+def build_bvh(entries):
+    """Builds a top-down Linear Bounding Volume Hierarchy (LBVH) flat array."""
+    nodes = []
+    
+    def build_recursive(current_entries):
+        if not current_entries:
+            return -1
+        
+        node_idx = len(nodes)
+        nodes.append(BvhNode())
+        node = nodes[node_idx]
+        
+        # Calculate bounds
+        min_x = min(e["aabb"]["min"][0] for e in current_entries)
+        min_y = min(e["aabb"]["min"][1] for e in current_entries)
+        min_z = min(e["aabb"]["min"][2] for e in current_entries)
+        max_x = max(e["aabb"]["max"][0] for e in current_entries)
+        max_y = max(e["aabb"]["max"][1] for e in current_entries)
+        max_z = max(e["aabb"]["max"][2] for e in current_entries)
+        
+        node.min = [min_x, min_y, min_z]
+        node.max = [max_x, max_y, max_z]
+        
+        if len(current_entries) == 1:
+            node.left_child = -1
+            node.payload = current_entries[0]["mesh_key"]
+            return node_idx
+        
+        # Split along longest axis
+        extent_x = max_x - min_x
+        extent_y = max_y - min_y
+        extent_z = max_z - min_z
+        
+        axis = 0
+        if extent_y > extent_x and extent_y > extent_z:
+            axis = 1
+        elif extent_z > extent_x and extent_z > extent_y:
+            axis = 2
+            
+        current_entries.sort(key=lambda e: (e["aabb"]["min"][axis] + e["aabb"]["max"][axis]) / 2.0)
+        
+        mid = len(current_entries) // 2
+        left_idx = build_recursive(current_entries[:mid])
+        right_idx = build_recursive(current_entries[mid:])
+        
+        nodes[node_idx].left_child = left_idx
+        nodes[node_idx].payload = right_idx
+        
+        return node_idx
+
+    if entries:
+        build_recursive(entries)
+        
+    return nodes
 
 def main():
     argv = sys.argv
@@ -175,7 +237,7 @@ def main():
     parser = argparse.ArgumentParser(description="Z-Anatomy Headless Batch Processing Pipeline")
     parser.add_argument("--output", default="assets/3d", help="Directory to save exported .glb files")
     parser.add_argument("--manifest", default="assets/db/manifest.json", help="Path to save the generated JSON manifest")
-    parser.add_argument("--bvh", default="assets/3d/spatial_bvh.json", help="Path to save precomputed spatial BVH AABB index")
+    parser.add_argument("--bvh", default="assets/3d/spatial_bvh.bin", help="Path to save precomputed spatial BVH AABB index")
     args = parser.parse_args(argv)
 
     os.makedirs(args.output, exist_ok=True)
@@ -207,9 +269,16 @@ def main():
     with open(args.manifest, "w", encoding="utf-8") as f:
         json.dump(manifest_entries, f, indent=2, ensure_ascii=False)
 
-    # Save Spatial BVH sidecar
-    with open(args.bvh, "w", encoding="utf-8") as f:
-        json.dump({"entities": bvh_entries}, f, indent=2, ensure_ascii=False)
+    # Build and Save Spatial BVH (LBVH Binary Format)
+    nodes = build_bvh(bvh_entries)
+    with open(args.bvh, "wb") as f:
+        for node in nodes:
+            # struct format: 3 floats, 1 int, 3 floats, 1 int = 32 bytes
+            data = struct.pack('<3fi3fi', 
+                node.min[0], node.min[1], node.min[2], node.left_child,
+                node.max[0], node.max[1], node.max[2], node.payload
+            )
+            f.write(data)
 
     print(f"\n[OK] Pipeline completed! Exported {len(manifest_entries)} entities to {args.manifest} and spatial index to {args.bvh}")
 
