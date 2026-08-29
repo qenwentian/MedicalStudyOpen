@@ -25,10 +25,10 @@ class ThermionViewport extends StatefulWidget {
   });
 
   @override
-  State<ThermionViewport> createState() => _ThermionViewportState();
+  State<ThermionViewport> createState() => ThermionViewportState();
 }
 
-class _ThermionViewportState extends State<ThermionViewport> {
+class ThermionViewportState extends State<ThermionViewport> {
   // ignore: unused_field
   ThermionViewer? _viewer;
 
@@ -54,6 +54,7 @@ class _ThermionViewportState extends State<ThermionViewport> {
       
       if (pickResult != null && mounted) {
         final entityId = pickResult.toString();
+        await DatabaseService().database;
         final entity = DatabaseService().getEntityById(entityId);
         
         if (entity != null) {

@@ -21,6 +21,7 @@ class AtlasScreen extends StatefulWidget {
 
 class _AtlasScreenState extends State<AtlasScreen> {
   final DatabaseService _db = DatabaseService();
+  final GlobalKey<ThermionViewportState> _viewportKey = GlobalKey<ThermionViewportState>();
 
   // ignore: unused_field
   ThermionViewer? _viewer;
@@ -69,7 +70,7 @@ class _AtlasScreenState extends State<AtlasScreen> {
     final uboIndex = _db.getUboIndexForSystem(systemId);
     if (uboIndex == null || _viewer == null) return;
 
-    // Single FFI call per slider frame -> mutates u_SystemAlpha[uboIndex] on GPU
+    _viewportKey.currentState?.setSystemAlpha(systemId, alpha);
     debugPrint('GPU UBO Call: SetSystemAlpha(uboIndex: $uboIndex, alpha: $alpha)');
   }
 
@@ -82,6 +83,7 @@ class _AtlasScreenState extends State<AtlasScreen> {
           // ── 1. 3D Viewport (Full Screen) ──────────────────────
           Positioned.fill(
             child: ThermionViewport(
+              key: _viewportKey,
               assetPath: 'assets/3d/skeleton_lod0.glb',
               onViewerReady: _onViewerReady,
               onMeshKeyPicked: _onMeshKeyPicked,

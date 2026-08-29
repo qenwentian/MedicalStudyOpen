@@ -25,8 +25,15 @@ class DatabaseService {
   /// System ID -> UBO Index mapping.
   final Map<String, int> _systemUboMap = {};
 
-  Future<Database> get database async {
-    if (_database != null) return _database!;
+  Future<Database>? _initDbFuture;
+
+  Future<Database> get database {
+    if (_database != null) return Future.value(_database!);
+    _initDbFuture ??= _initDatabaseAndWarmup();
+    return _initDbFuture!;
+  }
+
+  Future<Database> _initDatabaseAndWarmup() async {
     _database = await _initDatabase();
     await _warmupCache();
     return _database!;

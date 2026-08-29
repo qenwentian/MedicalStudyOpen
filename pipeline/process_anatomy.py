@@ -29,13 +29,13 @@ except ImportError:
 
 # ── System Definitions & Global UBO Index Mapping ──────────────────────────
 SYSTEM_COLLECTION_MAP = {
-    "Skeletal":       {"system_id": "SYS_SKELETAL",       "ubo_index": 0, "depth_priority": 1, "prefix": "BONE"},
-    "Nervous":        {"system_id": "SYS_NERVOUS",        "ubo_index": 1, "depth_priority": 2, "prefix": "NERV"},
-    "Visceral":       {"system_id": "SYS_VISCERAL",       "ubo_index": 2, "depth_priority": 3, "prefix": "ORGAN"},
-    "Organs":         {"system_id": "SYS_VISCERAL",       "ubo_index": 2, "depth_priority": 3, "prefix": "ORGAN"},
-    "Cardiovascular": {"system_id": "SYS_VASCULAR",       "ubo_index": 3, "depth_priority": 4, "prefix": "VASC"},
-    "Muscular":       {"system_id": "SYS_MUSCULAR",       "ubo_index": 4, "depth_priority": 5, "prefix": "MUSC"},
-    "Integumentary":  {"system_id": "SYS_INTEGUMENTARY",  "ubo_index": 5, "depth_priority": 6, "prefix": "SKIN"},
+    "Skeletal":       {"system_id": "SYS_SKELETAL",       "ubo_index": 0, "depth_priority": 1, "prefix": "BONE", "hex_color": "#E8E4D9"},
+    "Nervous":        {"system_id": "SYS_NERVOUS",        "ubo_index": 1, "depth_priority": 2, "prefix": "NERV", "hex_color": "#FFE066"},
+    "Visceral":       {"system_id": "SYS_VISCERAL",       "ubo_index": 2, "depth_priority": 3, "prefix": "ORGAN", "hex_color": "#E06D53"},
+    "Organs":         {"system_id": "SYS_VISCERAL",       "ubo_index": 2, "depth_priority": 3, "prefix": "ORGAN", "hex_color": "#E06D53"},
+    "Cardiovascular": {"system_id": "SYS_VASCULAR",       "ubo_index": 3, "depth_priority": 4, "prefix": "VASC", "hex_color": "#D63031"},
+    "Muscular":       {"system_id": "SYS_MUSCULAR",       "ubo_index": 4, "depth_priority": 5, "prefix": "MUSC", "hex_color": "#C0392B"},
+    "Integumentary":  {"system_id": "SYS_INTEGUMENTARY",  "ubo_index": 5, "depth_priority": 6, "prefix": "SKIN", "hex_color": "#EBBBA2"},
 }
 
 LOD_RATIOS = {
@@ -74,6 +74,12 @@ def process_collection(collection, system_info, output_dir, manifest_entries, ke
     if not shared_mat:
         shared_mat = bpy.data.materials.new(name=mat_name)
         shared_mat.blend_method = 'HASHED' # Enforce dithered transparency to prevent depth-sorting overload
+        shared_mat.use_nodes = True
+        bsdf = shared_mat.node_tree.nodes.get("Principled BSDF")
+        if bsdf:
+            hex_color = system_info.get("hex_color", "#FFFFFF").lstrip('#')
+            r, g, b = (int(hex_color[i:i+2], 16)/255.0 for i in (0, 2, 4))
+            bsdf.inputs['Base Color'].default_value = (r**2.2, g**2.2, b**2.2, 1.0)
 
     # 1. Record metadata, rename objects for native picking, assign shared material
     for obj in mesh_objects:
