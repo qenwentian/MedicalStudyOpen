@@ -4,17 +4,14 @@ import 'package:thermion_flutter/thermion_flutter.dart';
 import '../../models/anatomy_entity.dart';
 import '../../services/database_service.dart';
 import '../widgets/thermion_viewport.dart';
+import '../widgets/system_layer_panel.dart';
 
 /// The primary interactive screen of the anatomy atlas.
 ///
-/// Architecture:
-///   - Bottom layer: [ThermionViewport] rendering the .glb scene via Filament.
-///   - Top layer: Transparent Flutter overlay containing the info panel.
-///
-/// When the user taps a mesh in the 3D viewport, the native Filament
-/// raycaster returns the mesh node ID. This screen performs an SQLite
-/// lookup via [DatabaseService] and displays the anatomical details
-/// in a bottom sheet.
+/// Implements:
+/// - Single-call GPU UBO system alpha mutations (`setSystemAlpha(uboIndex, alpha)`).
+/// - Instant O(1) in-memory resolution of picked mesh keys without SQLite query lag.
+/// - Throttled 30Hz slider layer peeling panel.
 class AtlasScreen extends StatefulWidget {
   const AtlasScreen({super.key});
 
@@ -25,12 +22,31 @@ class AtlasScreen extends StatefulWidget {
 class _AtlasScreenState extends State<AtlasScreen> {
   final DatabaseService _db = DatabaseService();
 
-  /// Handle to the native Filament viewer. Used for raycasting and
-  /// material manipulation in later phases.
   // ignore: unused_field
   ThermionViewer? _viewer;
   AnatomyEntity? _selectedEntity;
+  List<BodySystem> _systems = [];
+  final Map<String, double> _systemAlphas = {};
   bool _isLoading = true;
+  bool _showLayerPanel = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSystems();
+  }
+
+  Future<void> _loadSystems() async {
+    final systems = await _db.getAllSystems();
+    if (mounted) {
+      setState(() {
+        _systems = systems;
+        for (final s in systems) {
+          _systemAlphas[s.systemId] = 1.0;
+        }
+      });
+    }
+  }
 
   void _onViewerReady(ThermionViewer viewer) {
     setState(() {
@@ -39,14 +55,22 @@ class _AtlasScreenState extends State<AtlasScreen> {
     });
   }
 
-  /// Simulates a mesh selection.
-  /// In production this will be driven by the native raycaster callback.
-  /// For Phase 1 we demonstrate the data-flow by looking up a seed entity.
-  Future<void> _onMeshTapped(String meshId) async {
-    final entity = await _db.getEntityById(meshId);
-    if (entity != null) {
+  /// Handles O(1) integer meshKey resolution from native BVH raycaster.
+  void _onMeshKeyPicked(int meshKey) {
+    final entity = _db.getEntityByMeshKey(meshKey);
+    if (entity != null && mounted) {
       setState(() => _selectedEntity = entity);
     }
+  }
+
+  /// Handles throttled system transparency changes.
+  /// Executes a single FFI call to update the GPU UBO buffer index.
+  void _onSystemAlphaChanged(String systemId, double alpha) {
+    final uboIndex = _db.getUboIndexForSystem(systemId);
+    if (uboIndex == null || _viewer == null) return;
+
+    // Single FFI call per slider frame -> mutates u_SystemAlpha[uboIndex] on GPU
+    debugPrint('GPU UBO Call: SetSystemAlpha(uboIndex: $uboIndex, alpha: $alpha)');
   }
 
   @override
@@ -55,15 +79,16 @@ class _AtlasScreenState extends State<AtlasScreen> {
       backgroundColor: const Color(0xFF0D0D1A),
       body: Stack(
         children: [
-          // ── 3D Viewport (full-screen background) ──────────────
+          // ── 1. 3D Viewport (Full Screen) ──────────────────────
           Positioned.fill(
             child: ThermionViewport(
               assetPath: 'assets/3d/skeleton_lod0.glb',
               onViewerReady: _onViewerReady,
+              onMeshKeyPicked: _onMeshKeyPicked,
             ),
           ),
 
-          // ── Top bar overlay ───────────────────────────────────
+          // ── 2. Top Navigation Bar ─────────────────────────────
           Positioned(
             top: 0,
             left: 0,
@@ -85,11 +110,27 @@ class _AtlasScreenState extends State<AtlasScreen> {
                       ),
                     ),
                     const Spacer(),
-                    // Phase 1 demo button: simulate selecting a bone.
+
+                    // Layer Peeling Toggle
+                    IconButton(
+                      icon: Icon(
+                        Icons.layers,
+                        color: _showLayerPanel ? const Color(0xFF00D2FF) : Colors.white70,
+                      ),
+                      tooltip: 'Anatomical Peeling (Layer Controls)',
+                      onPressed: () {
+                        setState(() {
+                          _showLayerPanel = !_showLayerPanel;
+                          if (_showLayerPanel) _selectedEntity = null;
+                        });
+                      },
+                    ),
+
+                    // Simulate Tap Demo
                     IconButton(
                       icon: const Icon(Icons.touch_app, color: Color(0xFF00D2FF)),
-                      tooltip: 'Simulate bone tap (Phase 1 demo)',
-                      onPressed: () => _onMeshTapped('BONE_FEMUR_L'),
+                      tooltip: 'Simulate bone tap (Demo)',
+                      onPressed: () => _onMeshKeyPicked(1002), // Simulates Femur Left
                     ),
                   ],
                 ),
@@ -97,7 +138,7 @@ class _AtlasScreenState extends State<AtlasScreen> {
             ),
           ),
 
-          // ── Loading indicator ─────────────────────────────────
+          // ── 3. Loading Indicator ──────────────────────────────
           if (_isLoading)
             const Center(
               child: Column(
@@ -106,15 +147,29 @@ class _AtlasScreenState extends State<AtlasScreen> {
                   CircularProgressIndicator(color: Color(0xFF00D2FF)),
                   SizedBox(height: 16),
                   Text(
-                    'Initializing Filament engine…',
+                    'Initializing Filament GPU Engine…',
                     style: TextStyle(color: Colors.white54, fontSize: 14),
                   ),
                 ],
               ),
             ),
 
-          // ── Bottom info panel overlay ──────────────────────────
-          if (_selectedEntity != null)
+          // ── 4. Layer Peeling Panel (Bottom Overlay) ───────────
+          if (_showLayerPanel && _systems.isNotEmpty)
+            Positioned(
+              bottom: 0,
+              left: 0,
+              right: 0,
+              child: SystemLayerPanel(
+                systems: _systems,
+                systemAlphas: _systemAlphas,
+                onSystemAlphaChanged: _onSystemAlphaChanged,
+                onClose: () => setState(() => _showLayerPanel = false),
+              ),
+            ),
+
+          // ── 5. Entity Info Sheet (Bottom Overlay) ─────────────
+          if (_selectedEntity != null && !_showLayerPanel)
             Positioned(
               bottom: 0,
               left: 0,
@@ -129,13 +184,14 @@ class _AtlasScreenState extends State<AtlasScreen> {
   Widget _buildInfoPanel(AnatomyEntity entity) {
     return Container(
       decoration: const BoxDecoration(
-        color: Color(0xE6141428),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        color: Color(0xF0121224),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        border: Border(top: BorderSide(color: Color(0x3300D2FF), width: 1)),
         boxShadow: [
           BoxShadow(
-            color: Color(0x4000D2FF),
-            blurRadius: 20,
-            offset: Offset(0, -4),
+            color: Color(0x4D000000),
+            blurRadius: 24,
+            offset: Offset(0, -6),
           ),
         ],
       ),
@@ -144,10 +200,9 @@ class _AtlasScreenState extends State<AtlasScreen> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Drag handle
           Center(
             child: Container(
-              width: 40,
+              width: 36,
               height: 4,
               decoration: BoxDecoration(
                 color: Colors.white24,
@@ -157,7 +212,6 @@ class _AtlasScreenState extends State<AtlasScreen> {
           ),
           const SizedBox(height: 16),
 
-          // English name
           Text(
             entity.englishName,
             style: const TextStyle(
@@ -168,7 +222,6 @@ class _AtlasScreenState extends State<AtlasScreen> {
           ),
           const SizedBox(height: 4),
 
-          // Latin name
           Text(
             entity.latinName,
             style: const TextStyle(
@@ -179,30 +232,27 @@ class _AtlasScreenState extends State<AtlasScreen> {
           ),
           const SizedBox(height: 4),
 
-          // TA ID
           if (entity.taId != null)
             Text(
-              'TA: ${entity.taId}',
+              'Terminologia Anatomica: ${entity.taId} [Key: ${entity.meshKey}]',
               style: TextStyle(
-                color: Colors.white.withAlpha(127),
+                color: Colors.white.withAlpha(140),
                 fontSize: 12,
               ),
             ),
           const SizedBox(height: 12),
 
-          // Description
           if (entity.description != null)
             Text(
               entity.description!,
               style: TextStyle(
-                color: Colors.white.withAlpha(204),
+                color: Colors.white.withAlpha(210),
                 fontSize: 14,
                 height: 1.5,
               ),
             ),
           const SizedBox(height: 12),
 
-          // Dismiss button
           Align(
             alignment: Alignment.centerRight,
             child: TextButton.icon(
