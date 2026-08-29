@@ -38,14 +38,21 @@ class _AtlasScreenState extends State<AtlasScreen> {
   }
 
   Future<void> _loadSystems() async {
-    final systems = await _db.getAllSystems();
-    if (mounted) {
-      setState(() {
-        _systems = systems;
-        for (final s in systems) {
-          _systemAlphas[s.systemId] = 1.0;
-        }
-      });
+    try {
+      final systems = await _db.getAllSystems();
+      if (mounted) {
+        setState(() {
+          _systems = systems;
+          for (final s in systems) {
+            _systemAlphas[s.systemId] = 1.0;
+          }
+        });
+      }
+    } catch (e) {
+      debugPrint('Failed to load systems: $e');
+      if (mounted) {
+        setState(() => _isLoading = false);
+      }
     }
   }
 

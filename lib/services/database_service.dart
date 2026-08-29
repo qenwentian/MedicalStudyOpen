@@ -48,9 +48,22 @@ class DatabaseService {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'anatomy.db');
 
+    const int currentAppDbVersion = 1; 
     final exists = await databaseExists(path);
+    bool shouldCopy = !exists;
 
-    if (!exists) {
+    if (exists) {
+      // Open temporarily just to check the version
+      final tempDb = await openDatabase(path);
+      final deviceVersion = await tempDb.getVersion();
+      await tempDb.close();
+      
+      if (deviceVersion < currentAppDbVersion) {
+        shouldCopy = true;
+      }
+    }
+
+    if (shouldCopy) {
       // Copy from assets
       try {
         await Directory(dirname(path)).create(recursive: true);
@@ -64,7 +77,12 @@ class DatabaseService {
       await File(path).writeAsBytes(bytes, flush: true);
     }
 
-    return openDatabase(path, version: 3);
+    // 2. Open the DB and stamp it with the current version
+    return openDatabase(
+      path, 
+      version: currentAppDbVersion,
+      onUpgrade: (db, oldVersion, newVersion) async {},
+    );
   }
 
   Future<void> _warmupCache() async {
