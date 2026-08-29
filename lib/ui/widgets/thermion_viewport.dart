@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:thermion_flutter/thermion_flutter.dart';
+import '../../ffi/bvh_bridge.dart';
 
 /// A high-performance 3D viewport wrapping Google Filament via Thermion.
 ///
@@ -49,13 +50,10 @@ class _ThermionViewportState extends State<ThermionViewport> {
       // an async Dart FFI function to the native Thermion/Filament raycaster.
       // e.g.: final hitMeshKey = await nativeBvhRaycast(physicalX, physicalY);
       
-      Future.microtask(() async {
-        // Simulating 5ms native background traversal
-        await Future.delayed(const Duration(milliseconds: 5));
-        
-        // Mock hit: 1002
-        final hitMeshKey = 1002; 
-        if (mounted) {
+      // Asynchronous C++ BVH Raycast via FFI
+      // The callback is executed safely on the Dart isolate by NativeCallable.listener.
+      BvhBridge.raycast(d.localPosition.dx, d.localPosition.dy, (hitMeshKey) {
+        if (mounted && hitMeshKey > 0) {
           widget.onMeshKeyPicked?.call(hitMeshKey);
         }
       });
