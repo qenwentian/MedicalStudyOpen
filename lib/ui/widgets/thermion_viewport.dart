@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:thermion_flutter/thermion_flutter.dart';
+import 'package:vector_math/vector_math_64.dart';
 import '../../services/database_service.dart';
 
 /// A high-performance 3D viewport wrapping Google Filament via Thermion.
