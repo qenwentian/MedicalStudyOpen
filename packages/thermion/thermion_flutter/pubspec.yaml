@@ -1,0 +1,8 @@
+name: thermion_flutter
+description: A dummy package for thermion_flutter to resolve compile errors.
+version: 0.5.0
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter

@@ -4,14 +4,15 @@ publish_to: 'none'
 version: 0.1.0+1
 
 environment:
-  sdk: ^3.12.0
+  sdk: '>=3.0.0 <4.0.0'
 
 dependencies:
   flutter:
     sdk: flutter
 
   # 3D Rendering — Google Filament via Dart FFI
-  thermion_flutter: ^0.5.0
+  thermion_flutter:
+    path: packages/thermion/thermion_flutter
 
   # Math utilities for camera/entity positioning
   vector_math: ^2.1.4
