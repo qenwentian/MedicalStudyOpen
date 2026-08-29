@@ -4,6 +4,7 @@ import 'dart:async';
 import 'dart:ffi';
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
+import 'package:vector_math/vector_math_64.dart';
 
 enum ManipulatorType { ORBIT }
 
@@ -12,7 +13,7 @@ class ThermionViewer {
     final completer = Completer<String?>();
     
     // Simulate FFI call using NativeCallable safely
-    final callable = NativeCallable<Void Function(Pointer<Utf8>)>.listener((namePtr) {
+    final callable = NativeCallable<Void Function(Pointer<Utf8>)>.listener((Pointer<Utf8> namePtr) {
       final name = namePtr.toDartString();
       if (name.isEmpty) {
         completer.complete(null);
@@ -32,9 +33,22 @@ class ThermionViewer {
 }
 
 class ViewerWidget extends StatefulWidget {
-  final Function(ThermionViewer)? onViewerReady;
-  final ManipulatorType? manipulator;
-  const ViewerWidget({Key? key, this.onViewerReady, this.manipulator}) : super(key: key);
+  final bool? transformToUnitCube;
+  final Vector3? initialCameraPosition;
+  final Color? background;
+  final ManipulatorType? manipulatorType;
+  final Function(ThermionViewer)? onViewerAvailable;
+  final Widget? initial;
+
+  const ViewerWidget({
+    Key? key,
+    this.transformToUnitCube,
+    this.initialCameraPosition,
+    this.background,
+    this.manipulatorType,
+    this.onViewerAvailable,
+    this.initial,
+  }) : super(key: key);
 
   @override
   State<ViewerWidget> createState() => _ViewerWidgetState();
@@ -44,7 +58,7 @@ class _ViewerWidgetState extends State<ViewerWidget> {
   @override
   void initState() {
     super.initState();
-    Future.microtask(() => widget.onViewerReady?.call(ThermionViewer()));
+    Future.microtask(() => widget.onViewerAvailable?.call(ThermionViewer()));
   }
   @override
   Widget build(BuildContext context) => const SizedBox.expand();
