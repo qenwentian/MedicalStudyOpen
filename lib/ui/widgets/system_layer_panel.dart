@@ -1,11 +1,13 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../../models/anatomy_entity.dart';
 
-/// A throttled layer peeling control panel for adjusting anatomical system transparency.
+/// A layer peeling control panel for adjusting anatomical system transparency.
 ///
-/// Implements **Vector 2 Mitigation (Event Thrashing)**:
-/// Caps slider update emissions to ~30Hz (33ms window) to prevent FFI bottlenecking.
+/// **WARNING: High-Frequency Event Emitter**
+/// This slider does NOT throttle emissions. `onSystemAlphaChanged` fires at 
+/// native display refresh rates (60Hz/120Hz). Consumers MUST guarantee O(1) 
+/// complexity in the callback (e.g., mutating a global GPU UBO buffer).
+/// Any heavy CPU operations or main-thread blocking here will freeze the UI.
 class SystemLayerPanel extends StatefulWidget {
   final List<BodySystem> systems;
   final Map<String, double> systemAlphas;
@@ -25,42 +27,13 @@ class SystemLayerPanel extends StatefulWidget {
 }
 
 class _SystemLayerPanelState extends State<SystemLayerPanel> {
-  // Throttler state
-  Timer? _throttleTimer;
-  String? _pendingSystemId;
-  double? _pendingAlpha;
-  int _lastEmitTimeMs = 0;
-
-  static const int _throttleWindowMs = 33; // ~30 Hz emission rate
-
   void _onSliderDragged(String systemId, double value) {
     setState(() {
       widget.systemAlphas[systemId] = value;
     });
-
-    final now = DateTime.now().millisecondsSinceEpoch;
-    if (now - _lastEmitTimeMs >= _throttleWindowMs) {
-      _lastEmitTimeMs = now;
-      widget.onSystemAlphaChanged(systemId, value);
-    } else {
-      _pendingSystemId = systemId;
-      _pendingAlpha = value;
-      _throttleTimer?.cancel();
-      _throttleTimer = Timer(Duration(milliseconds: _throttleWindowMs - (now - _lastEmitTimeMs)), () {
-        if (_pendingSystemId != null && _pendingAlpha != null) {
-          _lastEmitTimeMs = DateTime.now().millisecondsSinceEpoch;
-          widget.onSystemAlphaChanged(_pendingSystemId!, _pendingAlpha!);
-          _pendingSystemId = null;
-          _pendingAlpha = null;
-        }
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    _throttleTimer?.cancel();
-    super.dispose();
+    
+    // Direct emission since Global UBO mutations are O(1)
+    widget.onSystemAlphaChanged(systemId, value);
   }
 
   Color _parseHexColor(String hex) {
@@ -205,7 +178,7 @@ class _SystemLayerPanelState extends State<SystemLayerPanel> {
                         ),
                       ),
 
-                      // Slider with 30Hz Throttling
+                      // Slider
                       SizedBox(
                         width: 140,
                         child: SliderTheme(

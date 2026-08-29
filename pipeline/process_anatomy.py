@@ -79,7 +79,8 @@ def process_collection(collection, system_info, output_dir, manifest_entries, bv
 
     print(f"\n[+] Batching {collection.name} ({len(mesh_objects)} meshes) -> System: {system_id} [UBO Index: {ubo_index}]")
 
-    # 1. Record metadata and compute AABB bounds per entity
+    # 1. Record metadata, compute AABB bounds, and bake meshKey to TEXCOORD_1
+    uv_layer_name = "TEXCOORD_1"
     for obj in mesh_objects:
         key_counter += 1
         mesh_key = key_counter
@@ -105,18 +106,50 @@ def process_collection(collection, system_info, output_dir, manifest_entries, bv
             "hierarchy_path": f"{system_id}/{collection.name.upper()}/{entity_id}",
         })
 
-    # 2. Export discrete LOD tiers with Draco compression
+        # Bake mesh_key into UV map
+        mesh = obj.data
+        if uv_layer_name not in mesh.uv_layers:
+            mesh.uv_layers.new(name=uv_layer_name)
+        uv_layer = mesh.uv_layers[uv_layer_name]
+        
+        # We store the integer mesh_key directly into the UV's X coordinate.
+        for loop in mesh.loops:
+            uv_layer.data[loop.index].uv = (mesh_key, 0.0)
+
+    # 2. Join all meshes into a single object to reduce draw calls
+    bpy.ops.object.select_all(action="DESELECT")
+    for obj in mesh_objects:
+        obj.select_set(True)
+
+    # Architectural Mitigation: Explicitly override context for headless execution
+    # Headless environments lack a 3D Viewport context, causing bpy.ops to fail.
+    override = bpy.context.copy()
+    override["active_object"] = mesh_objects[0]
+    override["selected_editable_objects"] = mesh_objects
+    with bpy.context.temp_override(**override):
+        bpy.ops.object.join()
+    
+    joined_obj = bpy.context.active_object
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+    
+    # ── THE DECIMATION INTERPOLATION TRAP ──────────────────────────
+    # WARNING: We are adding a DECIMATE modifier after baking meshKey into TEXCOORD_1.
+    # Decimate collapses edges and *interpolates* UVs. 
+    # Since we did NOT run "Merge By Distance", the meshes remain separate islands,
+    # so Decimate will not bridge vertices from different anatomical parts (e.g. 1002 and 1003).
+    # IF you ever weld vertices before this step, Decimate will average the meshKeys 
+    # (e.g. UV X = 1002.5), completely destroying the ID system during C++ BVH raycasting.
+    # DO NOT WELD VERTICES ACROSS DISCRETE ANATOMICAL PARTS BEFORE DECIMATION.
+    decimate_mod = joined_obj.modifiers.new(name="DecimateLOD", type="DECIMATE")
+
+    # 3. Export discrete LOD tiers with Draco compression
     for lod_name, ratio in LOD_RATIOS.items():
         lod_filename = f"{system_id.lower()}_{lod_name.lower()}.glb"
         lod_filepath = os.path.join(output_dir, lod_filename)
 
         print(f"  -> Exporting {lod_name} (decimate: {ratio}) -> {lod_filename}...")
 
-        bpy.ops.object.select_all(action="DESELECT")
-        for obj in mesh_objects:
-            obj.select_set(True)
-
-        bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
+        decimate_mod.ratio = ratio
 
         bpy.ops.export_scene.gltf(
             filepath=lod_filepath,

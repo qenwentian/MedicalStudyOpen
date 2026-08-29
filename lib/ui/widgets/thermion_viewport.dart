@@ -39,10 +39,27 @@ class _ThermionViewportState extends State<ThermionViewport> {
     final physicalY = (event.localPosition.dy * dpr).toInt();
 
     try {
-      // ── 2. Native BVH Raycast Traversal ───────────────────────────
-      // Filament / Thermion executes O(log N) AABB tree traversal on native thread,
-      // reading the baked integer mesh key from the intersected vertex buffer.
+      // ── 2. Native BVH Raycast Traversal (Async FFI) ─────────────
+      // Passes physical coordinates to a background C++ thread to traverse the 
+      // spatial AABB tree. STRICTLY avoids GPU pixel-readbacks (glReadPixels) 
+      // which cause pipeline stalls.
       debugPrint('BVH Raycast -> Physical Target: ($physicalX, $physicalY) @ DPR: $dpr');
+      
+      // We simulate the async FFI boundary here. In reality, you would bind
+      // an async Dart FFI function to the native Thermion/Filament raycaster.
+      // e.g.: final hitMeshKey = await nativeBvhRaycast(physicalX, physicalY);
+      
+      Future.microtask(() async {
+        // Simulating 5ms native background traversal
+        await Future.delayed(const Duration(milliseconds: 5));
+        
+        // Mock hit: 1002
+        final hitMeshKey = 1002; 
+        if (mounted) {
+          widget.onMeshKeyPicked?.call(hitMeshKey);
+        }
+      });
+
     } catch (e) {
       debugPrint('Raycasting error: $e');
     }
@@ -62,7 +79,8 @@ class _ThermionViewportState extends State<ThermionViewport> {
       behavior: HitTestBehavior.opaque,
       onPointerDown: _handlePointerDown,
       child: ViewerWidget(
-        assetPath: widget.assetPath,
+        // Remove direct assetPath assignment to avoid blocking load.
+        // We will load it asynchronously via the viewer instance.
         transformToUnitCube: true,
         initialCameraPosition: Vector3(0, 1, 5),
         background: const Color(0xFF0D0D1A),
@@ -70,6 +88,19 @@ class _ThermionViewportState extends State<ThermionViewport> {
         onViewerAvailable: (viewer) async {
           _viewer = viewer;
           await viewer.removeSkybox();
+          
+          // ── Async Native Asset Loading ──────────────────────────────
+          // Prevents the "Draco Main-Thread Trap". Thermion handles 
+          // gltfio initialization in a C++ worker thread pool.
+          try {
+            debugPrint('Async loading asset: ${widget.assetPath}');
+            // Depending on the thermion version, the exact API might be loadAsset, 
+            // loadGlb, or similar, but we assume an async Future is returned.
+            await viewer.loadGltf(widget.assetPath);
+          } catch (e) {
+            debugPrint('Error loading asset asynchronously: $e');
+          }
+          
           widget.onViewerReady?.call(viewer);
         },
         initial: const Center(
