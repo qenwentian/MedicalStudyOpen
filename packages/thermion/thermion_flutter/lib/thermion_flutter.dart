@@ -9,6 +9,9 @@ import 'package:vector_math/vector_math_64.dart';
 enum ManipulatorType { ORBIT }
 
 class ThermionViewer {
+  Future<void> removeSkybox() async {}
+  Future<void> loadGltf(String assetPath) async {}
+
   Future<String?> pick(int x, int y) async {
     final completer = Completer<String?>();
     
