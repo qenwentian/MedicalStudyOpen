@@ -52,7 +52,7 @@ class _ThermionViewportState extends State<ThermionViewport> {
       
       // Asynchronous C++ BVH Raycast via FFI
       // The callback is executed safely on the Dart isolate by NativeCallable.listener.
-      BvhBridge.raycast(d.localPosition.dx, d.localPosition.dy, (hitMeshKey) {
+      BvhBridge.raycast(physicalX.toDouble(), physicalY.toDouble(), (hitMeshKey) {
         if (mounted && hitMeshKey > 0) {
           widget.onMeshKeyPicked?.call(hitMeshKey);
         }
