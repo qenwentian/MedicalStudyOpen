@@ -14,7 +14,7 @@ Usage:
 
 import sys
 import os
-import json
+import sqlite3
 import argparse
 import struct
 
@@ -68,7 +68,14 @@ def process_collection(collection, system_info, output_dir, manifest_entries, ke
 
     print(f"\n[+] Batching {collection.name} ({len(mesh_objects)} meshes) -> System: {system_id} [UBO Index: {ubo_index}]")
 
-    # 1. Record metadata, rename objects for native picking
+    # Ensure a single shared material for the system to allow O(1) opacity updates
+    mat_name = f"MAT_{system_id}"
+    shared_mat = bpy.data.materials.get(mat_name)
+    if not shared_mat:
+        shared_mat = bpy.data.materials.new(name=mat_name)
+        shared_mat.blend_method = 'HASHED' # Enforce dithered transparency to prevent depth-sorting overload
+
+    # 1. Record metadata, rename objects for native picking, assign shared material
     for obj in mesh_objects:
         key_counter += 1
         mesh_key = key_counter
@@ -87,6 +94,10 @@ def process_collection(collection, system_info, output_dir, manifest_entries, ke
             "system_id": system_id,
             "hierarchy_path": f"{system_id}/{collection.name.upper()}/{entity_id}",
         })
+
+        # Assign the shared material, replacing all existing materials
+        obj.data.materials.clear()
+        obj.data.materials.append(shared_mat)
 
         # Add Decimate modifier to each individual mesh
         if "DecimateLOD" not in obj.modifiers:
@@ -132,11 +143,55 @@ def main():
 
     parser = argparse.ArgumentParser(description="Z-Anatomy Headless Batch Processing Pipeline")
     parser.add_argument("--output", default="assets/3d", help="Directory to save exported .glb files")
-    parser.add_argument("--manifest", default="assets/db/manifest.json", help="Path to save the generated JSON manifest")
+    parser.add_argument("--manifest", default="assets/db/anatomy.db", help="Path to save the generated SQLite db")
     args = parser.parse_args(argv)
 
     os.makedirs(args.output, exist_ok=True)
     os.makedirs(os.path.dirname(args.manifest) or ".", exist_ok=True)
+
+    # Initialize SQLite database
+    db_path = args.manifest
+    if os.path.exists(db_path):
+        os.remove(db_path)
+    
+    conn = sqlite3.connect(db_path)
+    cursor = conn.cursor()
+    
+    # Create tables
+    cursor.execute('''
+      CREATE TABLE body_system (
+        system_id      TEXT PRIMARY KEY,
+        ubo_index      INTEGER NOT NULL UNIQUE,
+        name           TEXT NOT NULL,
+        hex_color      TEXT NOT NULL,
+        depth_priority INTEGER NOT NULL DEFAULT 1
+      )
+    ''')
+    
+    cursor.execute('''
+      CREATE TABLE anatomy_entity (
+        id             TEXT PRIMARY KEY,
+        mesh_key       INTEGER NOT NULL UNIQUE,
+        ta_id          TEXT,
+        latin_name     TEXT NOT NULL,
+        english_name   TEXT NOT NULL,
+        description    TEXT,
+        system_id      TEXT NOT NULL,
+        hierarchy_path TEXT,
+        FOREIGN KEY (system_id) REFERENCES body_system(system_id)
+      )
+    ''')
+    
+    # Seed systems
+    systems = [
+        ("SYS_SKELETAL",       0, "Skeletal System",               "#E8E4D9", 1),
+        ("SYS_NERVOUS",        1, "Nervous System",                "#FFE066", 2),
+        ("SYS_VISCERAL",       2, "Internal Organs & Viscera",     "#E06D53", 3),
+        ("SYS_VASCULAR",       3, "Cardiovascular System",         "#D63031", 4),
+        ("SYS_MUSCULAR",       4, "Muscular System",               "#C0392B", 5),
+        ("SYS_INTEGUMENTARY",  5, "Integumentary System (Skin)",   "#EBBBA2", 6),
+    ]
+    cursor.executemany("INSERT INTO body_system VALUES (?, ?, ?, ?, ?)", systems)
 
     manifest_entries = []
     key_counter = 1000
@@ -144,7 +199,7 @@ def main():
     print("=" * 65)
     print("  Z-Anatomy Headless High-Performance Asset Pipeline")
     print(f"  Target 3D Assets:  {args.output}")
-    print(f"  Target Manifest:   {args.manifest}")
+    print(f"  Target DB:         {args.manifest}")
     print("=" * 65)
 
     for col_name, system_info in SYSTEM_COLLECTION_MAP.items():
@@ -157,9 +212,17 @@ def main():
                     key_counter = process_collection(existing_col, system_info, args.output, manifest_entries, key_counter)
                     break
 
-    # Save manifest
-    with open(args.manifest, "w", encoding="utf-8") as f:
-        json.dump(manifest_entries, f, indent=2, ensure_ascii=False)
+    # Save manifest into DB
+    db_entries = [
+        (
+            ent["id"], ent["mesh_key"], ent["ta_id"], ent["latin_name"],
+            ent["english_name"], ent["description"], ent["system_id"], ent["hierarchy_path"]
+        ) for ent in manifest_entries
+    ]
+    cursor.executemany("INSERT INTO anatomy_entity VALUES (?, ?, ?, ?, ?, ?, ?, ?)", db_entries)
+    
+    conn.commit()
+    conn.close()
 
     print(f"\n[OK] Pipeline completed! Exported {len(manifest_entries)} entities to {args.manifest}")
 

@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:path/path.dart';
 
@@ -34,154 +36,23 @@ class DatabaseService {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'anatomy.db');
 
-    return openDatabase(
-      path,
-      version: 3,
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
-    );
-  }
+    final exists = await databaseExists(path);
 
-  Future<void> _onCreate(Database db, int version) async {
-    await db.execute('''
-      CREATE TABLE body_system (
-        system_id      TEXT PRIMARY KEY,
-        ubo_index      INTEGER NOT NULL UNIQUE,
-        name           TEXT NOT NULL,
-        hex_color      TEXT NOT NULL,
-        depth_priority INTEGER NOT NULL DEFAULT 1
-      )
-    ''');
+    if (!exists) {
+      // Copy from assets
+      try {
+        await Directory(dirname(path)).create(recursive: true);
+      } catch (_) {}
 
-    await db.execute('''
-      CREATE TABLE anatomy_entity (
-        id             TEXT PRIMARY KEY,
-        mesh_key       INTEGER NOT NULL UNIQUE,
-        ta_id          TEXT,
-        latin_name     TEXT NOT NULL,
-        english_name   TEXT NOT NULL,
-        description    TEXT,
-        system_id      TEXT NOT NULL,
-        hierarchy_path TEXT,
-        FOREIGN KEY (system_id) REFERENCES body_system(system_id)
-      )
-    ''');
+      // ByteData from flutter/services.dart
+      final data = await rootBundle.load('assets/db/anatomy.db');
+      final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
 
-    // ── Seed: Systems with Global UBO Indices & Depth Priorities ──
-    final systems = [
-      const BodySystem(
-        systemId: 'SYS_SKELETAL',
-        uboIndex: 0,
-        name: 'Skeletal System',
-        hexColor: '#E8E4D9',
-        depthPriority: 1, // Deepest core
-      ),
-      const BodySystem(
-        systemId: 'SYS_NERVOUS',
-        uboIndex: 1,
-        name: 'Nervous System',
-        hexColor: '#FFE066',
-        depthPriority: 2,
-      ),
-      const BodySystem(
-        systemId: 'SYS_VISCERAL',
-        uboIndex: 2,
-        name: 'Internal Organs & Viscera',
-        hexColor: '#E06D53',
-        depthPriority: 3,
-      ),
-      const BodySystem(
-        systemId: 'SYS_VASCULAR',
-        uboIndex: 3,
-        name: 'Cardiovascular System',
-        hexColor: '#D63031',
-        depthPriority: 4,
-      ),
-      const BodySystem(
-        systemId: 'SYS_MUSCULAR',
-        uboIndex: 4,
-        name: 'Muscular System',
-        hexColor: '#C0392B',
-        depthPriority: 5,
-      ),
-      const BodySystem(
-        systemId: 'SYS_INTEGUMENTARY',
-        uboIndex: 5,
-        name: 'Integumentary System (Skin)',
-        hexColor: '#EBBBA2',
-        depthPriority: 6, // Outermost layer
-      ),
-    ];
-
-    for (final sys in systems) {
-      await db.insert('body_system', sys.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
+      // Write the copied bytes to the device
+      await File(path).writeAsBytes(bytes, flush: true);
     }
 
-    // ── Seed: Initial Core Entities with Integer MeshKeys ───────────
-    final initialEntities = [
-      const AnatomyEntity(
-        id: 'BONE_SKULL',
-        meshKey: 1001,
-        taId: 'A02.1.00.001',
-        latinName: 'Cranium',
-        englishName: 'Skull',
-        description: 'The bony framework of the head, protecting the brain and organs of special sense.',
-        systemId: 'SYS_SKELETAL',
-        hierarchyPath: 'SYS_SKELETAL/AXIAL/SKULL',
-      ),
-      const AnatomyEntity(
-        id: 'BONE_FEMUR_L',
-        meshKey: 1002,
-        taId: 'A02.5.04.001',
-        latinName: 'Femur',
-        englishName: 'Thigh Bone (Left)',
-        description: 'The longest and strongest bone in the human body, extending from the hip to the knee.',
-        systemId: 'SYS_SKELETAL',
-        hierarchyPath: 'SYS_SKELETAL/APPENDICULAR/LOWER_LIMB/FEMUR_L',
-      ),
-      const AnatomyEntity(
-        id: 'BONE_FEMUR_R',
-        meshKey: 1003,
-        taId: 'A02.5.04.001',
-        latinName: 'Femur',
-        englishName: 'Thigh Bone (Right)',
-        description: 'The longest and strongest bone in the human body, extending from the hip to the knee.',
-        systemId: 'SYS_SKELETAL',
-        hierarchyPath: 'SYS_SKELETAL/APPENDICULAR/LOWER_LIMB/FEMUR_R',
-      ),
-      const AnatomyEntity(
-        id: 'MUSC_BICEPS_BRACHII_R',
-        meshKey: 2001,
-        taId: 'A04.6.02.005',
-        latinName: 'Musculus biceps brachii',
-        englishName: 'Biceps Brachii (Right)',
-        description: 'A two-headed muscle lying on the upper arm between the shoulder and the elbow.',
-        systemId: 'SYS_MUSCULAR',
-        hierarchyPath: 'SYS_MUSCULAR/UPPER_LIMB/ARM/BICEPS_R',
-      ),
-      const AnatomyEntity(
-        id: 'ORGAN_HEART',
-        meshKey: 3001,
-        taId: 'A12.1.00.001',
-        latinName: 'Cor',
-        englishName: 'Heart',
-        description: 'A muscular organ in most animals, which pumps blood through the blood vessels of the circulatory system.',
-        systemId: 'SYS_VISCERAL',
-        hierarchyPath: 'SYS_VISCERAL/THORAX/HEART',
-      ),
-    ];
-
-    for (final ent in initialEntities) {
-      await db.insert('anatomy_entity', ent.toMap(), conflictAlgorithm: ConflictAlgorithm.replace);
-    }
-  }
-
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 3) {
-      await db.execute('DROP TABLE IF EXISTS anatomy_entity');
-      await db.execute('DROP TABLE IF EXISTS body_system');
-      await _onCreate(db, newVersion);
-    }
+    return openDatabase(path, version: 3);
   }
 
   Future<void> _warmupCache() async {
