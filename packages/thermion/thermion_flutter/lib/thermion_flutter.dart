@@ -11,6 +11,11 @@ enum ManipulatorType { ORBIT }
 class ThermionViewer {
   Future<void> removeSkybox() async {}
   Future<void> loadGltf(String assetPath) async {}
+  
+  Future<void> setMaterialProperty(String materialName, String propertyName, List<double> values) async {
+    // Mock FFI call to C++ to mutate material instance
+    debugPrint('Mock FFI: setMaterialProperty($materialName, $propertyName, $values)');
+  }
 
   Future<String?> pick(int x, int y) async {
     final completer = Completer<String?>();

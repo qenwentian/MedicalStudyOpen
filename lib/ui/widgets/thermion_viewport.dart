@@ -70,18 +70,11 @@ class ThermionViewportState extends State<ThermionViewport> {
     }
   }
 
-  /// Sets the opacity of an entire anatomical system on the GPU in a single call.
-  /// Mutates the shared material instance for the system.
   void setSystemAlpha(String systemId, double alpha) {
     if (_viewer == null) return;
     
-    // In Phase 4, we use Shared Material Instances. We get the material by name.
-    // The Python pipeline named it MAT_{systemId}.
-    // Note: Thermion might require updating via a representative entity, but 
-    // depending on the exact API, setting material property globally is preferred.
-    // Assuming Thermion viewer exposes a way to fetch material by name or we apply to a known entity:
     debugPrint('GPU Material Set: MAT_$systemId alpha = $alpha');
-    // Example: _viewer!.setMaterialProperty('MAT_$systemId', 'baseColorFactor', [1.0, 1.0, 1.0, alpha]);
+    _viewer!.setMaterialProperty('MAT_$systemId', 'baseColorFactor', [1.0, 1.0, 1.0, alpha]);
   }
 
   @override

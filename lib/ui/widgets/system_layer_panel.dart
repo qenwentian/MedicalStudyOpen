@@ -28,9 +28,7 @@ class SystemLayerPanel extends StatefulWidget {
 
 class _SystemLayerPanelState extends State<SystemLayerPanel> {
   void _onSliderDragged(String systemId, double value) {
-    setState(() {
-      widget.systemAlphas[systemId] = value;
-    });
+    widget.systemAlphas[systemId] = value;
     
     // Direct emission since Global UBO mutations are O(1)
     widget.onSystemAlphaChanged(systemId, value);
@@ -122,84 +120,11 @@ class _SystemLayerPanelState extends State<SystemLayerPanel> {
                 final currentAlpha = widget.systemAlphas[system.systemId] ?? 1.0;
                 final color = _parseHexColor(system.hexColor);
 
-                return Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withAlpha(8),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withAlpha(15)),
-                  ),
-                  child: Row(
-                    children: [
-                      // Depth priority badge
-                      Container(
-                        width: 24,
-                        height: 24,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: color.withAlpha(40),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: color, width: 1.5),
-                        ),
-                        child: Text(
-                          '${system.depthPriority}',
-                          style: TextStyle(
-                            color: color,
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-
-                      // Name & Percentage
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              system.name,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            Text(
-                              'Opacity: ${(currentAlpha * 100).toInt()}%',
-                              style: TextStyle(
-                                color: Colors.white.withAlpha(120),
-                                fontSize: 11,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-
-                      // Slider
-                      SizedBox(
-                        width: 140,
-                        child: SliderTheme(
-                          data: SliderTheme.of(context).copyWith(
-                            activeTrackColor: color,
-                            inactiveTrackColor: Colors.white12,
-                            thumbColor: Colors.white,
-                            trackHeight: 3,
-                            thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                            overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
-                          ),
-                          child: Slider(
-                            value: currentAlpha,
-                            min: 0.0,
-                            max: 1.0,
-                            onChanged: (val) => _onSliderDragged(system.systemId, val),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
+                return _SystemSliderItem(
+                  system: system,
+                  initialAlpha: currentAlpha,
+                  color: color,
+                  onChanged: (val) => _onSliderDragged(system.systemId, val),
                 );
               },
             ),
@@ -209,3 +134,112 @@ class _SystemLayerPanelState extends State<SystemLayerPanel> {
     );
   }
 }
+
+class _SystemSliderItem extends StatefulWidget {
+  final BodySystem system;
+  final double initialAlpha;
+  final Color color;
+  final ValueChanged<double> onChanged;
+
+  const _SystemSliderItem({
+    required this.system,
+    required this.initialAlpha,
+    required this.color,
+    required this.onChanged,
+  });
+
+  @override
+  State<_SystemSliderItem> createState() => _SystemSliderItemState();
+}
+
+class _SystemSliderItemState extends State<_SystemSliderItem> {
+  late double _currentAlpha;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentAlpha = widget.initialAlpha;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withAlpha(8),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withAlpha(15)),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 24,
+            height: 24,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: widget.color.withAlpha(40),
+              shape: BoxShape.circle,
+              border: Border.all(color: widget.color, width: 1.5),
+            ),
+            child: Text(
+              '${widget.system.depthPriority}',
+              style: TextStyle(
+                color: widget.color,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  widget.system.name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+                Text(
+                  'Opacity: ${(_currentAlpha * 100).toInt()}%',
+                  style: TextStyle(
+                    color: Colors.white.withAlpha(120),
+                    fontSize: 11,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 140,
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: widget.color,
+                inactiveTrackColor: Colors.white12,
+                thumbColor: Colors.white,
+                trackHeight: 3,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
+              ),
+              child: Slider(
+                value: _currentAlpha,
+                min: 0.0,
+                max: 1.0,
+                onChanged: (val) {
+                  setState(() => _currentAlpha = val);
+                  widget.onChanged(val);
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
