@@ -1,5 +1,8 @@
 #include <iostream>
 #include <thread>
+#include <mutex>
+#include <queue>
+#include <condition_variable>
 #include <cstdint>
 #include <cmath>
 #include <algorithm>
@@ -25,7 +28,22 @@ struct alignas(32) BvhNode {
 static BvhNode* g_bvh = nullptr;
 static size_t g_num_nodes = 0;
 
+// Thread Pool / Worker Queue State
+struct RaycastRequest {
+    float physicalX;
+    float physicalY;
+    void (*callback)(int32_t);
+};
+
+static std::queue<RaycastRequest> g_requestQueue;
+static std::mutex g_queueMutex;
+static std::condition_variable g_queueCV;
+static bool g_workerRunning = false;
+static std::thread g_workerThread;
+
 extern "C" {
+    // Forward declaration for traversing
+    int32_t TraverseLBVH(const float origin[3], const float dir[3]);
 
     // Dummy Thermion integration function for unprojection.
     // In production, this securely wraps `filament::Camera::unproject()`.
@@ -33,6 +51,31 @@ extern "C" {
         // Mock unprojection for architecture demonstration
         outOrigin[0] = 0.0f; outOrigin[1] = 0.0f; outOrigin[2] = -10.0f;
         outDir[0] = 0.0f; outDir[1] = 0.0f; outDir[2] = 1.0f;
+    }
+
+    void BVHWorkerLoop() {
+        while (g_workerRunning) {
+            RaycastRequest req;
+            {
+                std::unique_lock<std::mutex> lock(g_queueMutex);
+                g_queueCV.wait(lock, [] { return !g_requestQueue.empty() || !g_workerRunning; });
+                
+                if (!g_workerRunning && g_requestQueue.empty()) break;
+                
+                req = g_requestQueue.front();
+                g_requestQueue.pop();
+            }
+            
+            float origin[3];
+            float dir[3];
+            ThermionUnproject(req.physicalX, req.physicalY, origin, dir);
+            
+            int32_t hitMeshKey = TraverseLBVH(origin, dir);
+            
+            if (req.callback) {
+                req.callback(hitMeshKey);
+            }
+        }
     }
 
     bool InitBvh(const char* filepath) {
@@ -59,7 +102,27 @@ extern "C" {
         g_num_nodes = sb.st_size / sizeof(BvhNode);
         close(fd);
 #endif
+        
+        // Start the single dedicated worker thread
+        if (g_bvh && !g_workerRunning) {
+            g_workerRunning = true;
+            g_workerThread = std::thread(BVHWorkerLoop);
+        }
+
         return g_bvh != nullptr;
+    }
+
+    void ShutdownBvh() {
+        if (g_workerRunning) {
+            {
+                std::lock_guard<std::mutex> lock(g_queueMutex);
+                g_workerRunning = false;
+            }
+            g_queueCV.notify_all();
+            if (g_workerThread.joinable()) {
+                g_workerThread.join();
+            }
+        }
     }
 
     // Slab method for AABB ray intersection
@@ -116,22 +179,14 @@ extern "C" {
 
     // Asynchronous FFI Bridge
     // Safe for NativeCallable.listener marshaling back to Dart.
+    // Uses a dedicated worker thread queue to prevent OS thread thrashing.
     void RaycastAsync(float physicalX, float physicalY, void (*callback)(int32_t hitMeshKey)) {
-        // Enqueue to background thread to preserve native 60fps refresh limits
-        std::thread([physicalX, physicalY, callback]() {
-            float origin[3];
-            float dir[3];
-            
-            // Generate exact ray matching Filament GPU state
-            ThermionUnproject(physicalX, physicalY, origin, dir);
-            
-            // Cache-line aligned traversal (<5ms)
-            int32_t hitMeshKey = TraverseLBVH(origin, dir);
-            
-            // Execute callback; NativeCallable handles isolate marshalling safely
-            if (callback) {
-                callback(hitMeshKey);
-            }
-        }).detach();
+        if (!g_workerRunning) return;
+        
+        {
+            std::lock_guard<std::mutex> lock(g_queueMutex);
+            g_requestQueue.push({physicalX, physicalY, callback});
+        }
+        g_queueCV.notify_one();
     }
 }
