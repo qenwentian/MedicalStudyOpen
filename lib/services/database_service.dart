@@ -64,6 +64,11 @@ class DatabaseService {
     }
 
     if (shouldCopy) {
+      if (exists) {
+        // CRITICAL: Purge old DB and its WAL/SHM journal files to prevent corruption!
+        await deleteDatabase(path);
+      }
+      
       // Copy from assets
       try {
         await Directory(dirname(path)).create(recursive: true);
