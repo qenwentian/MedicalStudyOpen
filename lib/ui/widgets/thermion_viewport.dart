@@ -48,7 +48,7 @@ class _ThermionViewportState extends State<ThermionViewport> {
       // Note: pick() may return a string (node name) or an int (Entity ID).
       // If it's a node name, we resolve it against the local SQLite manifest 
       // to get the integer meshKey.
-      final pickResult = await _viewer!.pick(event.localPosition.dx.toInt(), event.localPosition.dy.toInt());
+      final pickResult = await _viewer!.pick(physicalX, physicalY);
       
       if (pickResult != null && mounted) {
          // TODO: Resolve pickResult against manifest.
