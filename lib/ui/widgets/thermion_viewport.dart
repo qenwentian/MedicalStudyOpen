@@ -11,17 +11,21 @@ import '../../services/database_service.dart';
 /// 2. **Global System UBO Bridge:** Exposes a single O(1) FFI call to mutate system-level
 ///    opacities on the GPU (`setSystemAlpha(uboIndex, alpha)`).
 class ThermionViewport extends StatefulWidget {
-  final String assetPath;
+  final List<String> assetPaths;
   final void Function(ThermionViewer viewer)? onViewerReady;
 
   /// Emits the resolved integer mesh key from the native spatial BVH hit.
   final void Function(int meshKey)? onMeshKeyPicked;
+  
+  /// Emits when the user taps the background.
+  final VoidCallback? onBackgroundTapped;
 
   const ThermionViewport({
     super.key,
-    required this.assetPath,
+    required this.assetPaths,
     this.onViewerReady,
     this.onMeshKeyPicked,
+    this.onBackgroundTapped,
   });
 
   @override
@@ -66,6 +70,8 @@ class ThermionViewportState extends State<ThermionViewport> {
         } else {
           debugPrint('Picked unknown entity ID: $entityId');
         }
+      } else if (mounted) {
+        widget.onBackgroundTapped?.call();
       }
 
     } catch (e) {
@@ -100,10 +106,12 @@ class ThermionViewportState extends State<ThermionViewport> {
           // Prevents the "Draco Main-Thread Trap". Thermion handles 
           // gltfio initialization in a C++ worker thread pool.
           try {
-            debugPrint('Async loading asset: ${widget.assetPath}');
-            // Depending on the thermion version, the exact API might be loadAsset, 
-            // loadGlb, or similar, but we assume an async Future is returned.
-            await viewer.loadGltf(widget.assetPath);
+            for (final path in widget.assetPaths) {
+              debugPrint('Async loading asset: $path');
+              // Depending on the thermion version, the exact API might be loadAsset, 
+              // loadGlb, or similar, but we assume an async Future is returned.
+              await viewer.loadGltf(path);
+            }
           } catch (e) {
             debugPrint('Error loading asset asynchronously: $e');
           }

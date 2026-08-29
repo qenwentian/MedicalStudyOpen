@@ -85,9 +85,19 @@ class _AtlasScreenState extends State<AtlasScreen> {
           Positioned.fill(
             child: ThermionViewport(
               key: _viewportKey,
-              assetPath: 'assets/3d/skeleton_lod0.glb',
+              assetPaths: const [
+                'assets/3d/sys_skeletal_lod0.glb',
+                'assets/3d/sys_muscular_lod0.glb',
+                'assets/3d/sys_nervous_lod0.glb',
+                'assets/3d/sys_cardiovascular_lod0.glb',
+                'assets/3d/sys_respiratory_lod0.glb',
+                'assets/3d/sys_digestive_lod0.glb',
+              ],
               onViewerReady: _onViewerReady,
               onMeshKeyPicked: _onMeshKeyPicked,
+              onBackgroundTapped: () {
+                if (mounted) setState(() => _selectedEntity = null);
+              },
             ),
           ),
 
