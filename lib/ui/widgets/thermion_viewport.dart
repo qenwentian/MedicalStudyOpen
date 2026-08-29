@@ -54,7 +54,10 @@ class ThermionViewportState extends State<ThermionViewport> {
       
       if (pickResult != null && mounted) {
         final entityId = pickResult.toString();
+        // The ID points to something! Let's resolve it.
+        // Guarantee database is warmed up before searching (prevents race condition)
         await DatabaseService().database;
+        if (!mounted) return;
         final entity = DatabaseService().getEntityById(entityId);
         
         if (entity != null) {

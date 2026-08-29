@@ -34,9 +34,14 @@ class DatabaseService {
   }
 
   Future<Database> _initDatabaseAndWarmup() async {
-    _database = await _initDatabase();
-    await _warmupCache();
-    return _database!;
+    try {
+      _database = await _initDatabase();
+      await _warmupCache();
+      return _database!;
+    } catch (e) {
+      _initDbFuture = null; // Purge the poisoned cache
+      rethrow;
+    }
   }
 
   Future<Database> _initDatabase() async {

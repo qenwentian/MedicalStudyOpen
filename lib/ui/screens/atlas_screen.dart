@@ -50,6 +50,7 @@ class _AtlasScreenState extends State<AtlasScreen> {
   }
 
   void _onViewerReady(ThermionViewer viewer) {
+    if (!mounted) return;
     setState(() {
       _viewer = viewer;
       _isLoading = false;
